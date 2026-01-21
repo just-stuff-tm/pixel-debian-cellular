@@ -169,3 +169,5 @@ Contributions welcome! Submit issues and pull requests.
 ---
 
 **Made for Pixel Debian Terminal users** 📱💻
+
+- **[Discord](https://discord.gg/TbWRrDgjGQ)**
