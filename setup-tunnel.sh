@@ -1,119 +1,81 @@
 #!/bin/bash
-# ==============================
-# Pixel Debian Cellular Tunnel
-# Fully Interactive Installer
-# ==============================
-
-# --- CONFIGURATION ---
-TUN_NAME="tun0"
-TUN_IP="198.18.0.1"
-DEFAULT_SOCKS_PORT=1080
-
 echo "------------------------------------------"
 echo "🚀 Pixel Linux Tunnel Installer"
 echo "------------------------------------------"
 
-# --- HELPER FUNCTIONS ---
+# 1️⃣ Install dependencies
+echo "[*] Installing dependencies..."
+sudo apt update && sudo apt install -y git curl unzip iproute2 procps adb
 
-install_dependencies() {
-    echo "[*] Installing dependencies..."
-    sudo apt update
-    sudo apt install -y git curl unzip iproute2 procps adb
-    echo "[+] Dependencies installed."
-}
-
-install_tun2socks() {
-    if ! command -v tun2socks &>/dev/null; then
-        echo "[*] Installing tun2socks..."
-        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        VERSION="v2.6.0"
-        DOWNLOAD_URL="https://github.com/xJasonlyu/tun2socks/releases/download/${VERSION}/tun2socks-linux-${ARCH}.zip"
-
-        echo "[*] Downloading $DOWNLOAD_URL ..."
-        curl -L "$DOWNLOAD_URL" -o /tmp/tun2socks.zip
-
-        echo "[*] Extracting tun2socks..."
-        unzip -o /tmp/tun2socks.zip -d /tmp/
-        sudo mv /tmp/tun2socks-linux* /usr/local/bin/tun2socks
-        sudo chmod +x /usr/local/bin/tun2socks
-        echo "[+] tun2socks installed successfully."
+# 2️⃣ Ensure tun2socks is installed
+if ! command -v tun2socks >/dev/null 2>&1; then
+    echo "[*] Installing tun2socks..."
+    ARCH=$(uname -m)
+    if [[ $ARCH == "aarch64" ]]; then
+        URL="https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-linux-arm64.zip"
     else
-        echo "[+] tun2socks already installed."
+        URL="https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-linux-amd64.zip"
     fi
-}
+    curl -L -o /tmp/tun2socks.zip "$URL"
+    unzip /tmp/tun2socks.zip -d /tmp
+    sudo mv /tmp/tun2socks-linux* /usr/local/bin/tun2socks
+    sudo chmod +x /usr/local/bin/tun2socks
+fi
+echo "[+] tun2socks installed."
 
-detect_interface() {
-    # Auto-detect default interface
-    PHYS_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
-    if [ -z "$PHYS_IFACE" ]; then
-        read -rp "[?] Could not auto-detect interface. Enter interface name: " PHYS_IFACE
-    fi
-    echo "[*] Using interface: $PHYS_IFACE"
-}
+# 3️⃣ Ensure dns2socks is installed
+if ! command -v dns2socks >/dev/null 2>&1; then
+    echo "[*] Installing dns2socks..."
+    git clone https://github.com/txthinking/dns2socks.git /tmp/dns2socks
+    gcc /tmp/dns2socks/dns2socks.c -o /tmp/dns2socks/dns2socks
+    sudo mv /tmp/dns2socks/dns2socks /usr/local/bin/dns2socks
+    sudo chmod +x /usr/local/bin/dns2socks
+fi
+echo "[+] dns2socks installed."
 
-get_socks_server() {
-    echo "[*] Detecting reachable Pixel SOCKS server..."
+# 4️⃣ Select main interface
+IFACE=$(ip route get 1 | awk '{print $5; exit}')
+echo "[*] Using interface: $IFACE"
 
-    # Try ADB forward if device connected
-    if adb devices | grep -q "device$"; then
-        adb forward tcp:$DEFAULT_SOCKS_PORT tcp:$DEFAULT_SOCKS_PORT
-        echo "[+] Using ADB forward at 127.0.0.1:$DEFAULT_SOCKS_PORT"
-        SOCKS_IP="127.0.0.1"
-        SOCKS_PORT=$DEFAULT_SOCKS_PORT
-        return
-    fi
+# 5️⃣ Ask for Pixel SOCKS server
+read -p "[?] Enter Pixel SOCKS IP: " SOCKS_IP
+read -p "[?] Enter SOCKS port [1080]: " SOCKS_PORT
+SOCKS_PORT=${SOCKS_PORT:-1080}
 
-    # Manual input fallback
-    read -rp "[?] Enter Pixel SOCKS IP: " SOCKS_IP
-    read -rp "[?] Enter SOCKS port [${DEFAULT_SOCKS_PORT}]: " SOCKS_PORT
-    SOCKS_PORT=${SOCKS_PORT:-$DEFAULT_SOCKS_PORT}
+# 6️⃣ Enable IP forwarding
+sudo sysctl -w net.ipv4.ip_forward=1
 
-    if [[ -z "$SOCKS_IP" || -z "$SOCKS_PORT" ]]; then
-        echo "[!] Invalid SOCKS server. Exiting."
-        exit 1
-    fi
-}
+# 7️⃣ Start dns2socks for DNS resolution
+echo "[*] Starting dns2socks for proxy DNS..."
+sudo dns2socks "$SOCKS_IP" "$SOCKS_PORT" 8.8.8.8 127.0.0.1:53 &
+DNS_PID=$!
 
-start_tunnel() {
-    echo "[*] Cleaning previous sessions..."
-    sudo pkill -f tun2socks 2>/dev/null
-    sudo ip link delete $TUN_NAME 2>/dev/null
+# 8️⃣ Start tun2socks
+echo "[*] Starting tun2socks tunnel..."
+sudo tun2socks -device tun0 -interface "$IFACE" -proxy "socks5://$SOCKS_IP:$SOCKS_PORT" &
+TUN_PID=$!
+
+# 9️⃣ Wait for tun0
+echo "[*] Waiting for tun0 to come up..."
+while ! ip link show tun0 >/dev/null 2>&1; do
     sleep 1
+done
+echo "[+] TUN interface tun0 is ready."
 
-    echo "[*] Starting tunnel..."
-    sudo tun2socks -device $TUN_NAME -proxy socks5://$SOCKS_IP:$SOCKS_PORT -interface $PHYS_IFACE
-}
+# 10️⃣ Set default route via tun0
+sudo ip route add default dev tun0
 
-configure_tun() {
-    echo "[*] Configuring TUN interface..."
-    sudo ip addr add $TUN_IP/30 dev $TUN_NAME 2>/dev/null
-    sudo ip link set dev $TUN_NAME up
-    sudo ip route add default dev $TUN_NAME metric 1
-    echo "[+] TUN interface $TUN_NAME is up and routing all traffic."
-}
+# 11️⃣ Use dns2socks for DNS
+echo "[*] Pointing system DNS to dns2socks..."
+sudo cp /etc/resolv.conf /etc/resolv.conf.backup
+echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf
+echo "[+] DNS configured via dns2socks"
 
-verify_tunnel() {
-    echo "[*] Verifying tunnel connectivity..."
-    PUBLIC_IP=$(curl -s --interface $TUN_NAME --max-time 10 ipinfo.io/ip)
-    if [ -n "$PUBLIC_IP" ]; then
-        echo "------------------------------------------"
-        echo "✅ Tunnel is active!"
-        echo "🌍 Public IP: $PUBLIC_IP"
-        echo "------------------------------------------"
-    else
-        echo "------------------------------------------"
-        echo "❌ Tunnel up but no internet."
-        echo "🔍 Check Pixel SOCKS server or interface."
-        echo "------------------------------------------"
-    fi
-}
+# 12️⃣ Test connectivity
+echo "[*] Testing tunnel connectivity..."
+curl --interface tun0 -s https://ipinfo.io/ip
 
-# --- MAIN INSTALLER FLOW ---
-
-install_dependencies
-install_tun2socks
-detect_interface
-get_socks_server
-configure_tun
-start_tunnel
-verify_tunnel
+echo "[+] Tunnel setup complete."
+echo "[*] tun2socks PID: $TUN_PID"
+echo "[*] dns2socks PID: $DNS_PID"
+echo "[*] To stop tunnel: sudo kill $TUN_PID $DNS_PID"
