@@ -34,7 +34,7 @@ This project solves that by routing terminal traffic through your Pixel's cellul
 git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
 cd pixel-debian-cellular
 chmod +x setup-tunnel.sh
-./setup-tunnel.sh
+sudo ./setup-tunnel.sh
 ```
 ```bash
 # 3. Done! WiFi now optional:
