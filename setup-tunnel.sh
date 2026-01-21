@@ -1,15 +1,21 @@
 #!/bin/bash
-# ============================================================================
-# Pixel Debian Terminal → Cellular Data
-# Enable cellular data for Debian terminal (normally WiFi-only)
-# ============================================================================
+# Fixed version - Auto-detects Android host IP
 
 # --- CONFIGURATION ---
-PROXY_IP="127.0.0.1"
-PROXY_PORT="1080"
 TUN_NAME="tun0"
 TUN_IP="198.18.0.1"
 LOG_FILE="/tmp/tun2socks.log"
+
+# Auto-detect Android host IP (gateway)
+ANDROID_IP=$(ip route | grep default | awk '{print $3}' | head -n 1)
+
+if [ -z "$ANDROID_IP" ]; then
+    echo "❌ Cannot detect Android host IP"
+    exit 1
+fi
+
+PROXY_IP="$ANDROID_IP"  # Use gateway IP instead of 127.0.0.1
+PROXY_PORT="1080"
 
 set -e
 trap cleanup EXIT INT TERM
@@ -26,14 +32,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "📱 Pixel Debian Terminal → Cellular Data"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "ℹ️  Pixel's Debian terminal normally only has WiFi"
-echo "🚀 This enables cellular data access via tun2socks"
+echo "ℹ️  Detected Android host at: $ANDROID_IP"
 echo ""
 
 # 1. CHECK ROOT/PERMISSIONS
-if [ "$EUID" -ne 0 ] && ! command -v tsu &> /dev/null; then 
+if [ "$EUID" -ne 0 ]; then 
     echo "[!] This script needs root access"
-    echo "[!] Run with: sudo ./setup-tunnel.sh"
+    echo "[!] Run with: sudo ./setup-tunnel-fixed.sh"
     exit 1
 fi
 
@@ -42,32 +47,25 @@ if ! command -v tun2socks &> /dev/null; then
     echo "[*] First-time setup - checking WiFi for download..."
     
     if ! timeout 5 ping -c 1 8.8.8.8 &> /dev/null; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ No internet connection"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "📡 Initial setup requires WiFi to download tun2socks"
-        echo "   1. Connect Pixel to WiFi"
-        echo "   2. Run this script again"
-        echo ""
+        echo "❌ No internet - connect to WiFi first"
         exit 1
     fi
     echo "[+] WiFi connected ✓"
-    echo "[*] After setup, cellular works without WiFi"
-    echo ""
 fi
 
 # 3. PROXY CHECK
-echo "[*] Verifying SOCKS5 proxy at 127.0.0.1:$PROXY_PORT..."
+echo "[*] Verifying SOCKS5 proxy at $PROXY_IP:$PROXY_PORT..."
 if ! timeout 5 bash -c "echo > /dev/tcp/$PROXY_IP/$PROXY_PORT" 2>/dev/null; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "❌ Cannot connect to SOCKS5 proxy"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "Setup Every Proxy:"
-    echo "  1. Install from Play Store"
-    echo "  2. Configure: SOCKS5, port 1080, bind 127.0.0.1"
+    echo "Fix Every Proxy configuration:"
+    echo "  1. Open Every Proxy app"
+    echo "  2. Change 'Bind Address' to: 0.0.0.0"
     echo "  3. Tap START"
+    echo ""
+    echo "Then test: curl -x socks5://$PROXY_IP:1080 ipinfo.io/ip"
     echo ""
     exit 1
 fi
@@ -94,20 +92,10 @@ if ! command -v tun2socks &> /dev/null; then
     
     curl -L "$DOWNLOAD_URL" -o /tmp/tun2socks.zip
     unzip -o /tmp/tun2socks.zip -d /tmp/
-    
-    if [ -d "$PREFIX/bin" ]; then
-        mv /tmp/tun2socks-linux-${ARCH} $PREFIX/bin/tun2socks
-        chmod +x $PREFIX/bin/tun2socks
-    else
-        mv /tmp/tun2socks-linux-${ARCH} /usr/local/bin/tun2socks
-        chmod +x /usr/local/bin/tun2socks
-    fi
-    
+    mv /tmp/tun2socks-linux-${ARCH} /usr/local/bin/tun2socks
+    chmod +x /usr/local/bin/tun2socks
     rm /tmp/tun2socks.zip
     echo "[+] Installation complete ✓"
-    echo ""
-    echo "✅ Setup complete! WiFi no longer required."
-    echo ""
 fi
 
 # 5. CLEANUP OLD
@@ -139,6 +127,11 @@ done
 echo "[*] Configuring network..."
 ip addr add "$TUN_IP/30" dev "$TUN_NAME"
 ip link set dev "$TUN_NAME" up
+
+# Preserve route to Android host (critical!)
+ip route add $PROXY_IP via $ANDROID_IP dev enp0s12
+
+# Add default route through tunnel
 ip route add default dev "$TUN_NAME" metric 1
 
 echo "[+] Routing configured ✓"
@@ -164,8 +157,7 @@ if [ -n "$PUBLIC_IP" ]; then
     echo "   • IP: $PUBLIC_IP"
     echo "   • Carrier: $CARRIER"
     echo "   • Location: $LOCATION"
-    echo ""
-    echo "💡 WiFi can now be disabled"
+    echo "   • Via: $PROXY_IP:$PROXY_PORT"
     echo ""
     echo "Commands:"
     echo "   • Check: ./check-status.sh"
@@ -180,7 +172,7 @@ else
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     echo "Check:"
-    echo "  1. Every Proxy is running"
+    echo "  1. Every Proxy running with bind 0.0.0.0"
     echo "  2. Cellular data enabled"
     echo "  3. Logs: tail -f $LOG_FILE"
     echo ""
