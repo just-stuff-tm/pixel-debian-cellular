@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==========================================
-# 🚀 2026 Auto-Detecting SOCKS Tunnel Installer
-# Fully automatic: finds Pixel SOCKS server (Wi-Fi / USB / ADB)
+# 🚀 2026 Fully Automatic & Self-Healing Tunnel Installer
+# Detects Pixel SOCKS, switches interfaces, rebuilds on network changes
 # ==========================================
 
 TUN_NAME="tun0"
@@ -10,7 +10,7 @@ DEFAULT_SOCKS_PORT=1080
 CHECK_INTERVAL=10
 
 echo "------------------------------------------"
-echo "[*] Starting Auto-Detecting Tunnel Installer..."
+echo "[*] Starting Fully Automatic Tunnel Installer..."
 echo "------------------------------------------"
 
 # --- Dependencies ---
@@ -51,7 +51,7 @@ cleanup_tun() {
 detect_socks() {
     echo "[*] Detecting reachable Pixel SOCKS server..."
     
-    # 1. Check if ADB port forwarding is available
+    # 1. ADB forwarding
     if adb devices | grep -q "device$"; then
         adb forward tcp:$DEFAULT_SOCKS_PORT tcp:$DEFAULT_SOCKS_PORT 2>/dev/null
         echo "[+] Using ADB port forward on 127.0.0.1:$DEFAULT_SOCKS_PORT"
@@ -59,7 +59,7 @@ detect_socks() {
         return
     fi
 
-    # 2. Check local network (Wi-Fi hotspot)
+    # 2. Scan local network
     for ip in $(ip -4 addr show | grep -oP '(?<=inet\s)192\.168\.\d+\.\d+'); do
         if curl --socks5 $ip:$DEFAULT_SOCKS_PORT --max-time 2 https://ipinfo.io/ip &>/dev/null; then
             echo "[+] Found reachable SOCKS at $ip:$DEFAULT_SOCKS_PORT"
@@ -68,7 +68,7 @@ detect_socks() {
         fi
     done
 
-    echo "[!] No reachable SOCKS server found. Please ensure Pixel is running SOCKS server."
+    echo "[!] No reachable SOCKS server found."
     exit 1
 }
 
@@ -101,11 +101,10 @@ start_tun2socks() {
 
 # --- Verify tunnel ---
 verify_tunnel() {
-    echo "[*] Verifying tunnel connectivity..."
     local ip
     ip=$(curl --max-time 10 -s https://ipinfo.io/ip)
     if [ -z "$ip" ]; then
-        echo "[!] Tunnel not functional. Check Pixel SOCKS server."
+        echo "[!] Tunnel not functional."
         return 1
     else
         echo "[+] Tunnel is live! Public IP: $ip"
@@ -113,24 +112,33 @@ verify_tunnel() {
     fi
 }
 
+# --- Monitor and auto-rebuild ---
+monitor_tunnel() {
+    local socks_ip=$1
+    local socks_port=$2
+
+    OUT_IFACE=$(ip route | awk '/default/ {print $5; exit}')
+    while true; do
+        start_tun2socks "$socks_ip" "$socks_port" "$OUT_IFACE"
+        sleep 5
+        if ! verify_tunnel; then
+            echo "[*] Attempting to detect a new reachable SOCKS server..."
+            read socks_ip socks_port < <(detect_socks)
+            OUT_IFACE=$(ip route | awk '/default/ {print $5; exit}')
+            echo "[*] Rebuilding tunnel with new SOCKS $socks_ip:$socks_port..."
+        fi
+        sleep $CHECK_INTERVAL
+    done
+}
+
 # --- Main ---
 install_dependencies
 install_tun2socks
 
 # Detect SOCKS server automatically
-read SOCKS_DETECTED_IP SOCKS_DETECTED_PORT < <(detect_socks)
+read SOCKS_IP SOCKS_PORT < <(detect_socks)
 
-# Auto-detect interface
-OUT_IFACE=$(ip route | awk '/default/ {print $5; exit}')
-echo "[*] Using interface: $OUT_IFACE"
-
-# Start tunnel
-while true; do
-    start_tun2socks "$SOCKS_DETECTED_IP" "$SOCKS_DETECTED_PORT" "$OUT_IFACE"
-    sleep 5
-    verify_tunnel
-    echo "[*] Tunnel active. Monitoring network..."
-    while true; do sleep $CHECK_INTERVAL; done
-done
+echo "[*] Starting self-healing tunnel..."
+monitor_tunnel "$SOCKS_IP" "$SOCKS_PORT"
 
 trap 'echo "[*] Cleaning up..."; cleanup_tun; exit' EXIT
