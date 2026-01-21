@@ -1,50 +1,37 @@
 #!/bin/bash
 # ==========================================
-# 🚀 2026 Interactive Tunnel Installer (Any SOCKS)
-# Fully interactive, supports local, remote, and forwarded SOCKS servers
+# 🚀 2026 Auto-Detecting SOCKS Tunnel Installer
+# Fully automatic: finds Pixel SOCKS server (Wi-Fi / USB / ADB)
 # ==========================================
 
-# --- CONFIGURATION ---
 TUN_NAME="tun0"
 TUN_IP="198.18.0.1"
-DEFAULT_CHECK_INTERVAL=15
+DEFAULT_SOCKS_PORT=1080
+CHECK_INTERVAL=10
 
 echo "------------------------------------------"
-echo "[*] Starting Interactive Tunnel Installer..."
+echo "[*] Starting Auto-Detecting Tunnel Installer..."
 echo "------------------------------------------"
 
-# --- INSTALL REQUIRED PACKAGES ---
+# --- Dependencies ---
 install_dependencies() {
     echo "[*] Installing dependencies..."
     sudo apt update
-    sudo apt install -y git curl unzip iproute2 procps
+    sudo apt install -y git curl unzip iproute2 procps adb
     echo "[+] Dependencies installed."
 }
 
-# --- INSTALL tun2socks ---
+# --- Install tun2socks ---
 install_tun2socks() {
     if ! command -v tun2socks &>/dev/null; then
         echo "[*] Installing tun2socks..."
         ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        echo "[*] Detected architecture: $ARCH"
-
         DOWNLOAD_URL=$(curl -s https://api.github.com/repos/xJasonlyu/tun2socks/releases/latest \
             | grep browser_download_url \
             | grep "linux-$ARCH.zip" \
             | cut -d '"' -f 4)
-
-        if [ -z "$DOWNLOAD_URL" ]; then
-            echo "[!] Failed to get download URL from GitHub."
-            exit 1
-        fi
-
-        echo "[*] Downloading: $DOWNLOAD_URL"
         curl -L "$DOWNLOAD_URL" -o /tmp/tun2socks.zip
-
-        echo "[*] Extracting tun2socks..."
         unzip -j /tmp/tun2socks.zip -d /tmp/
-
-        echo "[*] Moving binary to /usr/local/bin..."
         sudo mv /tmp/tun2socks-linux* /usr/local/bin/tun2socks
         sudo chmod +x /usr/local/bin/tun2socks
         echo "[+] tun2socks installed successfully."
@@ -53,27 +40,51 @@ install_tun2socks() {
     fi
 }
 
-# --- CLEANUP ---
+# --- Cleanup previous tunnel ---
 cleanup_tun() {
     sudo pkill -f tun2socks &>/dev/null
     sudo ip link delete $TUN_NAME 2>/dev/null
     sudo ip route del default dev $TUN_NAME 2>/dev/null
 }
 
-# --- START TUN2SOCKS ---
+# --- Detect reachable SOCKS ---
+detect_socks() {
+    echo "[*] Detecting reachable Pixel SOCKS server..."
+    
+    # 1. Check if ADB port forwarding is available
+    if adb devices | grep -q "device$"; then
+        adb forward tcp:$DEFAULT_SOCKS_PORT tcp:$DEFAULT_SOCKS_PORT 2>/dev/null
+        echo "[+] Using ADB port forward on 127.0.0.1:$DEFAULT_SOCKS_PORT"
+        echo "127.0.0.1 $DEFAULT_SOCKS_PORT"
+        return
+    fi
+
+    # 2. Check local network (Wi-Fi hotspot)
+    for ip in $(ip -4 addr show | grep -oP '(?<=inet\s)192\.168\.\d+\.\d+'); do
+        if curl --socks5 $ip:$DEFAULT_SOCKS_PORT --max-time 2 https://ipinfo.io/ip &>/dev/null; then
+            echo "[+] Found reachable SOCKS at $ip:$DEFAULT_SOCKS_PORT"
+            echo "$ip $DEFAULT_SOCKS_PORT"
+            return
+        fi
+    done
+
+    echo "[!] No reachable SOCKS server found. Please ensure Pixel is running SOCKS server."
+    exit 1
+}
+
+# --- Start tun2socks ---
 start_tun2socks() {
-    local proxy_ip=$1
-    local proxy_port=$2
+    local socks_ip=$1
+    local socks_port=$2
     local iface=$3
 
     cleanup_tun
     sudo sysctl -w net.ipv4.ip_forward=1
 
-    echo "[*] Launching tun2socks -> $proxy_ip:$proxy_port on interface $iface"
-    sudo tun2socks -device $TUN_NAME -proxy socks5://$proxy_ip:$proxy_port -interface $iface &
+    echo "[*] Launching tun2socks -> $socks_ip:$socks_port on interface $iface"
+    sudo tun2socks -device $TUN_NAME -proxy socks5://$socks_ip:$socks_port -interface $iface &
 
-    # Wait for TUN
-    for i in {1..15}; do
+    for i in {1..10}; do
         if [ -d /sys/class/net/$TUN_NAME ]; then
             echo "[+] TUN interface $TUN_NAME is ready."
             break
@@ -88,49 +99,38 @@ start_tun2socks() {
     echo "[+] TUN interface configured and default route set."
 }
 
-# --- VERIFY TUN TRAFFIC ---
+# --- Verify tunnel ---
 verify_tunnel() {
     echo "[*] Verifying tunnel connectivity..."
-    local public_ip
-    public_ip=$(curl -s --max-time 10 https://ipinfo.io/ip)
-    if [ -z "$public_ip" ]; then
-        echo "[!] Tunnel not functional. Check your SOCKS server."
+    local ip
+    ip=$(curl --max-time 10 -s https://ipinfo.io/ip)
+    if [ -z "$ip" ]; then
+        echo "[!] Tunnel not functional. Check Pixel SOCKS server."
         return 1
     else
-        echo "[+] Tunnel is live! Public IP: $public_ip"
+        echo "[+] Tunnel is live! Public IP: $ip"
         return 0
     fi
 }
 
-# --- MAIN INSTALL & LAUNCH ---
+# --- Main ---
 install_dependencies
 install_tun2socks
 
-# --- Ask user for SOCKS info ---
-read -rp "[?] Enter SOCKS server IP or hostname: " SOCKS_HOST
-read -rp "[?] Enter SOCKS server port [1080]: " SOCKS_PORT
-SOCKS_PORT=${SOCKS_PORT:-1080}
+# Detect SOCKS server automatically
+read SOCKS_DETECTED_IP SOCKS_DETECTED_PORT < <(detect_socks)
 
-# --- Determine interface to bind ---
-read -rp "[?] Enter interface to bind for outgoing traffic [auto-detect]: " OUT_IFACE
-if [ -z "$OUT_IFACE" ]; then
-    # Auto-detect default interface
-    OUT_IFACE=$(ip route | awk '/default/ {print $5; exit}')
-fi
+# Auto-detect interface
+OUT_IFACE=$(ip route | awk '/default/ {print $5; exit}')
 echo "[*] Using interface: $OUT_IFACE"
 
-# --- Run Tunnel ---
+# Start tunnel
 while true; do
-    start_tun2socks "$SOCKS_HOST" "$SOCKS_PORT" "$OUT_IFACE"
+    start_tun2socks "$SOCKS_DETECTED_IP" "$SOCKS_DETECTED_PORT" "$OUT_IFACE"
     sleep 5
     verify_tunnel
-    echo "[*] Tunnel active. Monitoring network changes..."
-
-    # --- MONITOR LOOP ---
-    while true; do
-        sleep $DEFAULT_CHECK_INTERVAL
-    done
+    echo "[*] Tunnel active. Monitoring network..."
+    while true; do sleep $CHECK_INTERVAL; done
 done
 
-# --- CLEANUP ON EXIT ---
 trap 'echo "[*] Cleaning up..."; cleanup_tun; exit' EXIT
