@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==========================================
-# 🚀 2026 Fully Interactive Tunnel Installer (Fixed GitHub download)
-# Shows all output in terminal, installs dependencies, routes traffic
+# 🚀 2026 Interactive Tunnel Installer (Fixed Android SOCKS)
+# Shows all output, installs dependencies, routes traffic through Android
 # ==========================================
 
 # --- CONFIGURATION ---
@@ -104,12 +104,20 @@ verify_tunnel() {
     fi
 }
 
+# --- GET AND VALIDATE ANDROID HOST ---
+get_android_host() {
+    # Always detect gateway via tethered interface
+    local gw
+    gw=$(ip route show default dev $PHYSICAL_IFACE | awk '/default/ {print $3; exit}')
+    echo "$gw"
+}
+
 # --- MAIN INSTALL & LAUNCH ---
 install_dependencies
 install_tun2socks
 
 while true; do
-    PHYSICAL_GATEWAY=$(ip route show default | awk '/default/ {print $3; exit}')
+    PHYSICAL_GATEWAY=$(get_android_host)
     PROXY_PORT=${PROXY_PORT:-$DEFAULT_PROXY_PORT}
 
     if [ -z "$PHYSICAL_GATEWAY" ]; then
@@ -127,7 +135,8 @@ while true; do
     echo "[*] Tunnel active. Monitoring for network changes..."
     # --- MONITOR LOOP ---
     while true; do
-        CURRENT_GATEWAY=$(ip route show default | awk '/default/ {print $3; exit}')
+        # Always query Android host via tethered interface
+        CURRENT_GATEWAY=$(get_android_host)
         if [ "$CURRENT_GATEWAY" != "$PHYSICAL_GATEWAY" ]; then
             echo "[!] Network change detected. Rebuilding tunnel..."
             break
