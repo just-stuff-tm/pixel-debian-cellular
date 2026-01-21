@@ -1,15 +1,13 @@
 #!/bin/bash
 # ==========================================
-# 🚀 2026 Interactive Tunnel Installer (Fixed Android SOCKS)
-# Shows all output, installs dependencies, routes traffic through Android
+# 🚀 2026 Interactive Tunnel Installer (Any SOCKS)
+# Fully interactive, supports local, remote, and forwarded SOCKS servers
 # ==========================================
 
 # --- CONFIGURATION ---
 TUN_NAME="tun0"
 TUN_IP="198.18.0.1"
-PHYSICAL_IFACE="enp0s12"       # Your tethered interface
-DEFAULT_PROXY_PORT="1080"
-CHECK_INTERVAL=15               # Seconds between network checks
+DEFAULT_CHECK_INTERVAL=15
 
 echo "------------------------------------------"
 echo "[*] Starting Interactive Tunnel Installer..."
@@ -23,14 +21,13 @@ install_dependencies() {
     echo "[+] Dependencies installed."
 }
 
-# --- INSTALL tun2socks IF MISSING ---
+# --- INSTALL tun2socks ---
 install_tun2socks() {
     if ! command -v tun2socks &>/dev/null; then
         echo "[*] Installing tun2socks..."
         ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
         echo "[*] Detected architecture: $ARCH"
 
-        # Get the latest release download URL for the correct architecture
         DOWNLOAD_URL=$(curl -s https://api.github.com/repos/xJasonlyu/tun2socks/releases/latest \
             | grep browser_download_url \
             | grep "linux-$ARCH.zip" \
@@ -56,7 +53,7 @@ install_tun2socks() {
     fi
 }
 
-# --- CLEANUP TUN ---
+# --- CLEANUP ---
 cleanup_tun() {
     sudo pkill -f tun2socks &>/dev/null
     sudo ip link delete $TUN_NAME 2>/dev/null
@@ -67,14 +64,15 @@ cleanup_tun() {
 start_tun2socks() {
     local proxy_ip=$1
     local proxy_port=$2
+    local iface=$3
 
     cleanup_tun
     sudo sysctl -w net.ipv4.ip_forward=1
 
-    echo "[*] Launching tun2socks -> $proxy_ip:$proxy_port"
-    sudo tun2socks -device $TUN_NAME -proxy socks5://$proxy_ip:$proxy_port -interface $PHYSICAL_IFACE &
+    echo "[*] Launching tun2socks -> $proxy_ip:$proxy_port on interface $iface"
+    sudo tun2socks -device $TUN_NAME -proxy socks5://$proxy_ip:$proxy_port -interface $iface &
 
-    # Wait for TUN interface
+    # Wait for TUN
     for i in {1..15}; do
         if [ -d /sys/class/net/$TUN_NAME ]; then
             echo "[+] TUN interface $TUN_NAME is ready."
@@ -96,7 +94,7 @@ verify_tunnel() {
     local public_ip
     public_ip=$(curl -s --max-time 10 https://ipinfo.io/ip)
     if [ -z "$public_ip" ]; then
-        echo "[!] Tunnel not functional. Check Android proxy."
+        echo "[!] Tunnel not functional. Check your SOCKS server."
         return 1
     else
         echo "[+] Tunnel is live! Public IP: $public_ip"
@@ -104,44 +102,33 @@ verify_tunnel() {
     fi
 }
 
-# --- GET AND VALIDATE ANDROID HOST ---
-get_android_host() {
-    # Always detect gateway via tethered interface
-    local gw
-    gw=$(ip route show default dev $PHYSICAL_IFACE | awk '/default/ {print $3; exit}')
-    echo "$gw"
-}
-
 # --- MAIN INSTALL & LAUNCH ---
 install_dependencies
 install_tun2socks
 
+# --- Ask user for SOCKS info ---
+read -rp "[?] Enter SOCKS server IP or hostname: " SOCKS_HOST
+read -rp "[?] Enter SOCKS server port [1080]: " SOCKS_PORT
+SOCKS_PORT=${SOCKS_PORT:-1080}
+
+# --- Determine interface to bind ---
+read -rp "[?] Enter interface to bind for outgoing traffic [auto-detect]: " OUT_IFACE
+if [ -z "$OUT_IFACE" ]; then
+    # Auto-detect default interface
+    OUT_IFACE=$(ip route | awk '/default/ {print $5; exit}')
+fi
+echo "[*] Using interface: $OUT_IFACE"
+
+# --- Run Tunnel ---
 while true; do
-    PHYSICAL_GATEWAY=$(get_android_host)
-    PROXY_PORT=${PROXY_PORT:-$DEFAULT_PROXY_PORT}
-
-    if [ -z "$PHYSICAL_GATEWAY" ]; then
-        echo "[!] Android host not detected. Retrying in $CHECK_INTERVAL seconds..."
-        sleep $CHECK_INTERVAL
-        continue
-    fi
-
-    echo "[*] Detected Android host: $PHYSICAL_GATEWAY via $PHYSICAL_IFACE"
-    start_tun2socks "$PHYSICAL_GATEWAY" "$PROXY_PORT"
-
+    start_tun2socks "$SOCKS_HOST" "$SOCKS_PORT" "$OUT_IFACE"
     sleep 5
     verify_tunnel
+    echo "[*] Tunnel active. Monitoring network changes..."
 
-    echo "[*] Tunnel active. Monitoring for network changes..."
     # --- MONITOR LOOP ---
     while true; do
-        # Always query Android host via tethered interface
-        CURRENT_GATEWAY=$(get_android_host)
-        if [ "$CURRENT_GATEWAY" != "$PHYSICAL_GATEWAY" ]; then
-            echo "[!] Network change detected. Rebuilding tunnel..."
-            break
-        fi
-        sleep $CHECK_INTERVAL
+        sleep $DEFAULT_CHECK_INTERVAL
     done
 done
 
