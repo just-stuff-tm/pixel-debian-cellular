@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==========================================
-# 🚀 2026 Fully Resilient Tunnel (Daemon)
-# Auto-installs dependencies, runs in background
+# 🚀 2026 Fully Interactive Tunnel Installer
+# Shows all output in terminal, installs dependencies, routes traffic
 # ==========================================
 
 # --- CONFIGURATION ---
@@ -9,10 +9,13 @@ TUN_NAME="tun0"
 TUN_IP="198.18.0.1"
 PHYSICAL_IFACE="enp0s12"       # Your tethered interface
 DEFAULT_PROXY_PORT="1080"
-LOG_FILE="/tmp/tun2socks.log"
 CHECK_INTERVAL=15               # Seconds between network checks
 
-# --- FUNCTIONS ---
+echo "------------------------------------------"
+echo "[*] Starting Interactive Tunnel Installer..."
+echo "------------------------------------------"
+
+# --- INSTALL REQUIRED PACKAGES ---
 install_dependencies() {
     echo "[*] Installing dependencies..."
     sudo apt update
@@ -20,74 +23,79 @@ install_dependencies() {
     echo "[+] Dependencies installed."
 }
 
+# --- INSTALL tun2socks IF MISSING ---
 install_tun2socks() {
     if ! command -v tun2socks &>/dev/null; then
         echo "[*] Installing tun2socks..."
         ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
         VERSION=$(curl -s https://api.github.com/repos/xJasonlyu/tun2socks/releases/latest \
                   | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        echo "[*] Latest release detected: $VERSION"
         DOWNLOAD_URL="https://github.com/xJasonlyu/tun2socks/releases/download/${VERSION}/tun2socks-linux-${ARCH}.v${VERSION#v}.zip"
+        echo "[*] Downloading: $DOWNLOAD_URL"
         curl -L "$DOWNLOAD_URL" -o /tmp/tun2socks.zip
+        echo "[*] Extracting tun2socks..."
         unzip -j /tmp/tun2socks.zip -d /tmp/
+        echo "[*] Moving binary to /usr/local/bin..."
         sudo mv /tmp/tun2socks-linux* /usr/local/bin/tun2socks
         sudo chmod +x /usr/local/bin/tun2socks
-        echo "[+] tun2socks installed (v$VERSION)."
+        echo "[+] tun2socks installed."
+    else
+        echo "[+] tun2socks already installed."
     fi
 }
 
+# --- CLEANUP TUN ---
 cleanup_tun() {
     sudo pkill -f tun2socks &>/dev/null
     sudo ip link delete $TUN_NAME 2>/dev/null
     sudo ip route del default dev $TUN_NAME 2>/dev/null
 }
 
+# --- START TUN2SOCKS ---
 start_tun2socks() {
     local proxy_ip=$1
     local proxy_port=$2
 
     cleanup_tun
-    sudo sysctl -w net.ipv4.ip_forward=1 &>/dev/null
+    sudo sysctl -w net.ipv4.ip_forward=1
 
     echo "[*] Launching tun2socks -> $proxy_ip:$proxy_port"
-    sudo tun2socks -device $TUN_NAME -proxy socks5://$proxy_ip:$proxy_port -interface $PHYSICAL_IFACE > "$LOG_FILE" 2>&1 &
-
+    sudo tun2socks -device $TUN_NAME -proxy socks5://$proxy_ip:$proxy_port -interface $PHYSICAL_IFACE &
+    
     # Wait for TUN interface
-    for i in {1..10}; do
-        [ -d /sys/class/net/$TUN_NAME ] && break
+    for i in {1..15}; do
+        if [ -d /sys/class/net/$TUN_NAME ]; then
+            echo "[+] TUN interface $TUN_NAME is ready."
+            break
+        fi
+        echo "[*] Waiting for $TUN_NAME..."
         sleep 1
     done
 
     sudo ip addr add $TUN_IP/30 dev $TUN_NAME 2>/dev/null
     sudo ip link set dev $TUN_NAME up
     sudo ip route add default dev $TUN_NAME metric 1 2>/dev/null
-    echo "[+] TUN interface $TUN_NAME is up."
+    echo "[+] TUN interface configured and default route set."
 }
 
+# --- VERIFY TUN TRAFFIC ---
 verify_tunnel() {
+    echo "[*] Verifying tunnel connectivity..."
     local public_ip
     public_ip=$(curl -s --max-time 10 https://ipinfo.io/ip)
     if [ -z "$public_ip" ]; then
-        echo "[!] Tunnel not functional. Check proxy & log: $LOG_FILE"
+        echo "[!] Tunnel not functional. Check Android proxy."
         return 1
     else
-        echo "[+] Tunnel is live. Public IP: $public_ip"
+        echo "[+] Tunnel is live! Public IP: $public_ip"
         return 0
     fi
 }
 
-# --- DAEMONIZE ---
-if [ "$1" != "--daemon" ]; then
-    echo "[*] Relaunching in background..."
-    nohup sudo bash "$0" --daemon > /tmp/tunnel-daemon.log 2>&1 &
-    echo "[+] Tunnel daemon started. Logs: /tmp/tunnel-daemon.log"
-    exit 0
-fi
-
-# --- MAIN LOOP ---
+# --- MAIN INSTALL & LAUNCH ---
 install_dependencies
 install_tun2socks
-
-trap 'echo "[*] Cleaning up..."; cleanup_tun; exit' EXIT
 
 while true; do
     PHYSICAL_GATEWAY=$(ip route show default | awk '/default/ {print $3; exit}')
@@ -103,9 +111,10 @@ while true; do
     start_tun2socks "$PHYSICAL_GATEWAY" "$PROXY_PORT"
 
     sleep 5
-    verify_tunnel && echo "[*] Tunnel active. Monitoring..." || echo "[!] Tunnel failed."
+    verify_tunnel
 
-    # Monitor for network changes
+    echo "[*] Tunnel active. Monitoring for network changes..."
+    # --- MONITOR LOOP ---
     while true; do
         CURRENT_GATEWAY=$(ip route show default | awk '/default/ {print $3; exit}')
         if [ "$CURRENT_GATEWAY" != "$PHYSICAL_GATEWAY" ]; then
@@ -115,3 +124,6 @@ while true; do
         sleep $CHECK_INTERVAL
     done
 done
+
+# --- CLEANUP ON EXIT ---
+trap 'echo "[*] Cleaning up..."; cleanup_tun; exit' EXIT
