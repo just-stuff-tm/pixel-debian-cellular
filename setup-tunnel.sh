@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==========================================
-# 🚀 2026 Fully Interactive Tunnel Installer
+# 🚀 2026 Fully Interactive Tunnel Installer (Fixed GitHub download)
 # Shows all output in terminal, installs dependencies, routes traffic
 # ==========================================
 
@@ -28,18 +28,29 @@ install_tun2socks() {
     if ! command -v tun2socks &>/dev/null; then
         echo "[*] Installing tun2socks..."
         ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        VERSION=$(curl -s https://api.github.com/repos/xJasonlyu/tun2socks/releases/latest \
-                  | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        echo "[*] Latest release detected: $VERSION"
-        DOWNLOAD_URL="https://github.com/xJasonlyu/tun2socks/releases/download/${VERSION}/tun2socks-linux-${ARCH}.v${VERSION#v}.zip"
+        echo "[*] Detected architecture: $ARCH"
+
+        # Get the latest release download URL for the correct architecture
+        DOWNLOAD_URL=$(curl -s https://api.github.com/repos/xJasonlyu/tun2socks/releases/latest \
+            | grep browser_download_url \
+            | grep "linux-$ARCH.zip" \
+            | cut -d '"' -f 4)
+
+        if [ -z "$DOWNLOAD_URL" ]; then
+            echo "[!] Failed to get download URL from GitHub."
+            exit 1
+        fi
+
         echo "[*] Downloading: $DOWNLOAD_URL"
         curl -L "$DOWNLOAD_URL" -o /tmp/tun2socks.zip
+
         echo "[*] Extracting tun2socks..."
         unzip -j /tmp/tun2socks.zip -d /tmp/
+
         echo "[*] Moving binary to /usr/local/bin..."
         sudo mv /tmp/tun2socks-linux* /usr/local/bin/tun2socks
         sudo chmod +x /usr/local/bin/tun2socks
-        echo "[+] tun2socks installed."
+        echo "[+] tun2socks installed successfully."
     else
         echo "[+] tun2socks already installed."
     fi
@@ -62,7 +73,7 @@ start_tun2socks() {
 
     echo "[*] Launching tun2socks -> $proxy_ip:$proxy_port"
     sudo tun2socks -device $TUN_NAME -proxy socks5://$proxy_ip:$proxy_port -interface $PHYSICAL_IFACE &
-    
+
     # Wait for TUN interface
     for i in {1..15}; do
         if [ -d /sys/class/net/$TUN_NAME ]; then
