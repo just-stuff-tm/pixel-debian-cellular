@@ -27,13 +27,16 @@ This project solves that by routing terminal traffic through your Pixel's cellul
 # 1. Install Every Proxy from Play Store
 #    Configure: SOCKS5, port 1080, bind 127.0.0.1
 #    Tap START
-
+```
+```bash
 # 2. In Debian Terminal (connect to WiFi first):
+
 git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
 cd pixel-debian-cellular
 chmod +x setup-tunnel.sh
 ./setup-tunnel.sh
-
+```
+```bash
 # 3. Done! WiFi now optional:
 curl ipinfo.io/ip  # Shows cellular IP
 # You can now disable WiFi - terminal keeps cellular internet
