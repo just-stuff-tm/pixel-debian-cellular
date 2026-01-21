@@ -1,0 +1,22 @@
+# Logs
+*.log
+/tmp/
+
+# Config overrides
+config.local.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.zip
+tun2socks
+/build/
