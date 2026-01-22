@@ -1,55 +1,14 @@
 #!/bin/bash
 # ============================================================================
-# Pixel Debian Terminal → Cellular Data (WORKING VERSION)
-# Fixes: Auto-detects Android host IP, proper routing, correct tun2socks
+# Complete Pixel Debian Cellular Setup
+# Installs all dependencies and configures cellular tunnel
 # ============================================================================
 
 set -e
-trap cleanup EXIT INT TERM
-
-cleanup() {
-    if [ "$CLEANUP_NEEDED" = "true" ]; then
-        echo "[*] Cleaning up on exit..."
-        pkill -f tun2socks 2>/dev/null || true
-        ip link delete tun0 2>/dev/null || true
-    fi
-}
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📱 Pixel Debian → Cellular Tunnel (Fixed)"
+echo "📦 Pixel Debian Cellular - Complete Setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# --- CONFIGURATION ---
-TUN_NAME="tun0"
-TUN_IP="198.18.0.1"
-PROXY_PORT="1080"
-LOG_FILE="/tmp/tun2socks.log"
-
-# --- AUTO-DETECT ANDROID HOST ---
-echo "[*] Detecting network configuration..."
-
-# Get default gateway (Android host IP)
-ANDROID_IP=$(ip route | grep default | awk '{print $3}' | head -n 1)
-if [ -z "$ANDROID_IP" ]; then
-    echo "❌ Cannot detect Android host IP"
-    echo "   Run: ip route"
-    exit 1
-fi
-
-# Get interface name
-INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
-if [ -z "$INTERFACE" ]; then
-    INTERFACE="enp0s12"  # Fallback
-fi
-
-PROXY_IP="$ANDROID_IP"
-PROXY_URL="socks5://${PROXY_IP}:${PROXY_PORT}"
-
-echo "[+] Network detected:"
-echo "   • Android host: $ANDROID_IP"
-echo "   • Interface: $INTERFACE"
-echo "   • Proxy: $PROXY_IP:$PROXY_PORT"
 echo ""
 
 # --- ROOT CHECK ---
@@ -59,39 +18,215 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# --- EVERY PROXY CHECK ---
-echo "[*] Testing SOCKS5 proxy connection..."
+# --- PHASE 1: INSTALL DEPENDENCIES ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📦 Phase 1: Installing Dependencies"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 
-if ! timeout 5 bash -c "echo > /dev/tcp/$PROXY_IP/$PROXY_PORT" 2>/dev/null; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "❌ Cannot reach proxy at $PROXY_IP:$PROXY_PORT"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Check internet connectivity
+if ! timeout 5 ping -c 1 8.8.8.8 &> /dev/null; then
+    echo "❌ No internet connection"
+    echo "   Please connect to WiFi first for initial setup"
+    exit 1
+fi
+
+echo "[*] Updating package lists..."
+apt update || {
+    echo "⚠️  apt update failed, continuing anyway..."
+}
+
+echo ""
+echo "[*] Installing required packages..."
+
+# List of required packages
+PACKAGES=(
+    "curl"
+    "unzip"
+    "iproute2"
+    "iptables"
+    "procps"
+)
+
+for pkg in "${PACKAGES[@]}"; do
+    if ! dpkg -l | grep -q "^ii  $pkg "; then
+        echo "   Installing $pkg..."
+        apt install -y "$pkg" || {
+            echo "⚠️  Failed to install $pkg, continuing..."
+        }
+    else
+        echo "   ✓ $pkg already installed"
+    fi
+done
+
+echo ""
+echo "[+] System packages ready ✓"
+echo ""
+
+# --- PHASE 2: INSTALL TUN2SOCKS ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📥 Phase 2: Installing tun2socks"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+if command -v tun2socks &> /dev/null; then
+    CURRENT_VERSION=$(tun2socks -version 2>&1 | head -1 || echo "unknown")
+    echo "[*] tun2socks already installed: $CURRENT_VERSION"
     echo ""
-    echo "Fix Every Proxy configuration:"
+    read -p "Reinstall latest version? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "[*] Skipping tun2socks installation"
+        SKIP_TUN2SOCKS=true
+    fi
+fi
+
+if [ "$SKIP_TUN2SOCKS" != "true" ]; then
+    echo "[*] Detecting architecture..."
+    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+    echo "   Architecture: $ARCH"
+    
     echo ""
-    echo "  1. Open Every Proxy app on Android"
-    echo "  2. Settings:"
-    echo "     • Server Type: SOCKS5"
-    echo "     • Port: 1080"
-    echo "     • Bind Address: 0.0.0.0  ← IMPORTANT"
-    echo "  3. Tap START"
+    echo "[*] Fetching latest release from GitHub..."
+    VERSION=$(curl -s https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/' 2>/dev/null || echo "")
+    
+    if [ -z "$VERSION" ]; then
+        echo "⚠️  Could not fetch latest version, using v2.5.2"
+        VERSION="2.5.2"
+    fi
+    
+    echo "   Latest version: v$VERSION"
+    
+    DOWNLOAD_URL="https://github.com/xjasonlyu/tun2socks/releases/download/v${VERSION}/tun2socks-linux-${ARCH}.zip"
+    
     echo ""
-    echo "Then test manually:"
-    echo "  curl -x socks5://$PROXY_IP:1080 ipinfo.io/ip"
+    echo "[*] Downloading tun2socks v$VERSION..."
+    curl -L --progress-bar "$DOWNLOAD_URL" -o /tmp/tun2socks.zip || {
+        echo "❌ Download failed"
+        exit 1
+    }
+    
+    echo "[*] Extracting..."
+    unzip -o -q /tmp/tun2socks.zip -d /tmp/
+    
+    echo "[*] Installing to /usr/local/bin..."
+    mv /tmp/tun2socks-linux-${ARCH} /usr/local/bin/tun2socks
+    chmod +x /usr/local/bin/tun2socks
+    rm /tmp/tun2socks.zip
+    
+    INSTALLED_VERSION=$(tun2socks -version 2>&1 | head -1)
+    echo ""
+    echo "[+] tun2socks installed successfully ✓"
+    echo "   $INSTALLED_VERSION"
+fi
+
+echo ""
+
+# --- PHASE 3: DETECT NETWORK ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔍 Phase 3: Network Configuration Detection"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Configuration
+TUN_NAME="tun0"
+TUN_IP="198.18.0.1/30"
+PROXY_PORT="1080"
+INTERFACE="enp0s12"
+LOG_FILE="/tmp/tun2socks.log"
+
+echo "[*] Detecting network configuration..."
+
+# Get Android host IP (proxy server)
+ANDROID_IP=$(ip route | grep default | awk '{print $3}' | head -n 1)
+
+# Get local gateway
+SUBNET=$(ip addr show $INTERFACE 2>/dev/null | grep -oP 'inet \K[\d.]+/\d+' | head -1)
+if [ -n "$SUBNET" ]; then
+    GATEWAY=$(echo $SUBNET | cut -d'/' -f1 | sed 's/\.[0-9]*$/.1/')
+else
+    # Fallback: try to detect from route
+    GATEWAY=$(ip route | grep "default" | awk '{print $3}' | head -n 1)
+fi
+
+if [ -z "$ANDROID_IP" ]; then
+    echo "❌ Cannot detect Android host IP"
+    echo ""
+    echo "Current routes:"
+    ip route show
     echo ""
     exit 1
 fi
 
-echo "[+] Proxy is reachable ✓"
+if [ -z "$GATEWAY" ]; then
+    echo "⚠️  Cannot auto-detect gateway, using Android IP as gateway"
+    GATEWAY="$ANDROID_IP"
+fi
+
+PROXY_IP="$ANDROID_IP"
+PROXY_URL="socks5://${PROXY_IP}:${PROXY_PORT}"
+
+echo ""
+echo "[+] Network Configuration Detected:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   • Android Host: $ANDROID_IP"
+echo "   • Gateway: $GATEWAY"
+echo "   • Interface: $INTERFACE"
+echo "   • Proxy: $PROXY_IP:$PROXY_PORT"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Test actual SOCKS functionality
+# --- PHASE 4: VERIFY EVERY PROXY ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔌 Phase 4: Verify Every Proxy Connection"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "[*] Testing connection to proxy..."
+if ! timeout 5 bash -c "echo > /dev/tcp/$PROXY_IP/$PROXY_PORT" 2>/dev/null; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "❌ CANNOT REACH PROXY"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Every Proxy is not reachable at $PROXY_IP:$PROXY_PORT"
+    echo ""
+    echo "Please configure Every Proxy on Android:"
+    echo ""
+    echo "  1. Install Every Proxy from Play Store"
+    echo "     https://play.google.com/store/apps/details?id=com.gorillasoftware.everyproxy"
+    echo ""
+    echo "  2. Open Every Proxy app"
+    echo ""
+    echo "  3. Configure settings:"
+    echo "     ┌─────────────────────────────┐"
+    echo "     │ Server Type: SOCKS5         │"
+    echo "     │ Port: 1080                  │"
+    echo "     │ Bind Address: 0.0.0.0       │  ← IMPORTANT"
+    echo "     │ Authentication: None/OFF    │"
+    echo "     └─────────────────────────────┘"
+    echo ""
+    echo "  4. Tap START button"
+    echo ""
+    echo "  5. Verify notification: 'Proxy server running on port 1080'"
+    echo ""
+    echo "  6. Run this script again"
+    echo ""
+    exit 1
+fi
+
+echo "[+] Port $PROXY_PORT is reachable ✓"
+echo ""
+
 echo "[*] Testing SOCKS5 functionality..."
 TEST_IP=$(timeout 10 curl -s -x socks5://$PROXY_IP:$PROXY_PORT ipinfo.io/ip 2>/dev/null || echo "")
 
 if [ -z "$TEST_IP" ]; then
-    echo "⚠️  Proxy reachable but not responding to SOCKS5 requests"
-    echo "   Check Every Proxy is actually started (not just installed)"
+    echo "⚠️  WARNING: Port reachable but SOCKS5 not responding"
+    echo ""
+    echo "This might mean:"
+    echo "  • Every Proxy is installed but not started"
+    echo "  • Wrong server type (must be SOCKS5)"
+    echo "  • Authentication is enabled (should be off)"
     echo ""
     read -p "Continue anyway? (y/n) " -n 1 -r
     echo
@@ -99,178 +234,161 @@ if [ -z "$TEST_IP" ]; then
         exit 1
     fi
 else
-    echo "[+] SOCKS5 working! Current IP: $TEST_IP ✓"
-    echo ""
+    echo "[+] SOCKS5 working perfectly! ✓"
+    echo "   Test IP: $TEST_IP"
 fi
 
-# --- INSTALL TUN2SOCKS ---
-if ! command -v tun2socks &> /dev/null; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📦 Installing tun2socks (xjasonlyu version)"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
-    # Check internet
-    if ! timeout 5 ping -c 1 8.8.8.8 &> /dev/null; then
-        echo "❌ No internet. Connect to WiFi first."
-        exit 1
-    fi
-    
-    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-    echo "[*] Detected architecture: $ARCH"
-    
-    # Fetch latest version
-    echo "[*] Fetching latest release info..."
-    VERSION=$(curl -s https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    
-    if [ -z "$VERSION" ]; then
-        echo "⚠️  Cannot fetch latest version, using v2.5.2"
-        VERSION="2.5.2"
-    fi
-    
-    DOWNLOAD_URL="https://github.com/xjasonlyu/tun2socks/releases/download/v${VERSION}/tun2socks-linux-${ARCH}.zip"
-    
-    echo "[*] Downloading tun2socks v$VERSION..."
-    curl -L "$DOWNLOAD_URL" -o /tmp/tun2socks.zip || {
-        echo "❌ Download failed"
-        exit 1
-    }
-    
-    echo "[*] Extracting..."
-    unzip -o /tmp/tun2socks.zip -d /tmp/
-    
-    echo "[*] Installing to /usr/local/bin..."
-    mv /tmp/tun2socks-linux-${ARCH} /usr/local/bin/tun2socks
-    chmod +x /usr/local/bin/tun2socks
-    rm /tmp/tun2socks.zip
-    
-    echo "[+] tun2socks installed: $(tun2socks -version 2>&1 | head -1)"
-    echo ""
-fi
-
-# --- CLEANUP OLD SESSIONS ---
-echo "[*] Cleaning up old sessions..."
-CLEANUP_NEEDED=true
-
-pkill -f tun2socks 2>/dev/null || true
-sleep 1
-
-if ip link show $TUN_NAME &> /dev/null; then
-    ip link delete $TUN_NAME 2>/dev/null || true
-fi
-
-ip route del default dev $TUN_NAME 2>/dev/null || true
-
-echo "[+] Cleanup complete"
 echo ""
 
-# --- START TUN2SOCKS ---
-echo "[*] Starting tun2socks..."
+# --- PHASE 5: CONFIGURE TUNNEL ---
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🚀 Phase 5: Configure Cellular Tunnel"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Step 5.1: Cleanup
+echo "[Step 5.1] Cleanup previous instances..."
+pkill -f tun2socks 2>/dev/null || true
+sleep 1
+ip link delete $TUN_NAME 2>/dev/null || true
+ip route del default dev $TUN_NAME 2>/dev/null || true
+ip route del $PROXY_IP via $GATEWAY dev $INTERFACE 2>/dev/null || true
+echo "   ✓ Cleanup complete"
+echo ""
+
+# Step 5.2: Proxy bypass route
+echo "[Step 5.2] Configure proxy bypass route..."
+echo "   Adding: $PROXY_IP via $GATEWAY dev $INTERFACE"
+ip route add $PROXY_IP via $GATEWAY dev $INTERFACE || {
+    echo "   ⚠️  Route may already exist, continuing..."
+}
+echo "   ✓ Bypass route configured"
+echo ""
+
+# Step 5.3: Start tun2socks
+echo "[Step 5.3] Start tun2socks..."
+echo "   Device: $TUN_NAME"
 echo "   Proxy: $PROXY_URL"
 echo "   Interface: $INTERFACE"
 echo ""
 
-tun2socks -device $TUN_NAME -proxy "$PROXY_URL" -interface "$INTERFACE" -loglevel info > "$LOG_FILE" 2>&1 &
+tun2socks -device $TUN_NAME -proxy "$PROXY_URL" -interface $INTERFACE -loglevel info > "$LOG_FILE" 2>&1 &
 TUN2SOCKS_PID=$!
 
-echo "[+] tun2socks started (PID: $TUN2SOCKS_PID)"
+echo "   ✓ tun2socks started (PID: $TUN2SOCKS_PID)"
+echo ""
 
-# --- WAIT FOR INTERFACE ---
-echo "[*] Waiting for tunnel interface..."
-
+# Wait for interface
+echo "[Step 5.4] Waiting for tunnel interface..."
 for i in {1..10}; do 
     if [ -d "/sys/class/net/$TUN_NAME" ]; then
-        echo "[+] Interface $TUN_NAME created ✓"
+        echo "   ✓ Interface $TUN_NAME created"
         break
     fi
     if [ $i -eq 10 ]; then
-        echo "❌ Interface failed to initialize"
+        echo "   ❌ Interface failed to initialize"
         echo "   Check logs: tail $LOG_FILE"
         exit 1
     fi
     sleep 1
 done
-
-# --- CONFIGURE NETWORK ---
-echo "[*] Configuring network..."
-
-# Assign IP to tunnel
-ip addr add "$TUN_IP/30" dev $TUN_NAME
-ip link set dev $TUN_NAME up
-
-# CRITICAL: Preserve route to proxy (prevent routing loop)
-echo "[*] Adding route to proxy server..."
-ip route add $PROXY_IP/32 via $ANDROID_IP dev $INTERFACE 2>/dev/null || true
-
-# Set default route through tunnel (highest priority)
-echo "[*] Setting default route through tunnel..."
-ip route add default dev $TUN_NAME metric 1
-
-echo "[+] Network configured ✓"
 echo ""
 
-# --- VERIFY CONNECTIVITY ---
+# Step 5.5: Configure interface
+echo "[Step 5.5] Configure tunnel interface..."
+ip addr add $TUN_IP dev $TUN_NAME
+ip link set dev $TUN_NAME up
+echo "   ✓ Interface configured"
+echo ""
+
+# Step 5.6: Set routing
+echo "[Step 5.6] Set default route through tunnel..."
+ip route add default dev $TUN_NAME metric 1
+echo "   ✓ Routing configured"
+echo ""
+
+# --- PHASE 6: VERIFY ---
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🧪 Testing cellular connection..."
+echo "🧪 Phase 6: Verify Connectivity"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 sleep 2
 
+echo "[*] Testing connection through tunnel..."
 PUBLIC_IP=$(timeout 15 curl -s --interface $TUN_NAME ipinfo.io/ip 2>/dev/null || echo "")
 
 if [ -n "$PUBLIC_IP" ]; then
-    # Success! Get more info
     CARRIER=$(timeout 10 curl -s --interface $TUN_NAME ipinfo.io/org 2>/dev/null | sed 's/^AS[0-9]* //' || echo "Unknown")
     LOCATION=$(timeout 10 curl -s --interface $TUN_NAME ipinfo.io/city 2>/dev/null || echo "Unknown")
     
+    echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "✅ SUCCESS! Cellular tunnel is ACTIVE"
+    echo "✅ SETUP COMPLETE - TUNNEL ACTIVE!"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "📱 Debian terminal now using cellular data!"
-    echo ""
-    echo "📊 Connection Details:"
+    echo "📱 Connection Details:"
     echo "   • Public IP: $PUBLIC_IP"
     echo "   • Carrier: $CARRIER"
     echo "   • Location: $LOCATION"
-    echo "   • Via proxy: $PROXY_IP:$PROXY_PORT"
+    echo "   • Via Proxy: $PROXY_IP:$PROXY_PORT"
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📋 Routing Table:"
-    ip route show | grep -E "default|$TUN_NAME|$PROXY_IP" | sed 's/^/   /'
+    echo "📋 Active Configuration:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Routes:"
+    ip route show | sed 's/^/   /'
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "💡 Useful Commands:"
-    echo "   • Test IP: curl ipinfo.io/ip"
-    echo "   • Check status: ip route show"
-    echo "   • View logs: tail -f $LOG_FILE"
-    echo "   • Stop tunnel: sudo pkill tun2socks"
+    echo "💡 Next Steps:"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
-    CLEANUP_NEEDED=false
+    echo ""
+    echo "   Test connection:"
+    echo "     curl ipinfo.io/ip"
+    echo ""
+    echo "   View logs:"
+    echo "     tail -f $LOG_FILE"
+    echo ""
+    echo "   Stop tunnel:"
+    echo "     sudo pkill tun2socks"
+    echo ""
+    echo "   Process ID: $TUN2SOCKS_PID"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🎉 Your Debian terminal now uses cellular data!"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
 else
+    echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "❌ Tunnel created but NO CONNECTIVITY"
+    echo "❌ SETUP FAILED - NO CONNECTIVITY"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "🔍 Troubleshooting:"
+    echo "Troubleshooting:"
     echo ""
     echo "1. Check tun2socks logs:"
     echo "   tail -20 $LOG_FILE"
     echo ""
-    echo "2. Verify Every Proxy:"
+    echo "2. Verify Every Proxy on Android:"
     echo "   • Is it running?"
-    echo "   • Bound to 0.0.0.0:1080?"
-    echo "   • Test: curl -x socks5://$PROXY_IP:1080 ipinfo.io/ip"
+    echo "   • SOCKS5 on 0.0.0.0:1080?"
+    echo "   • Test: curl -x socks5://$PROXY_IP:$PROXY_PORT ipinfo.io/ip"
     echo ""
     echo "3. Check cellular data:"
-    echo "   • Is cellular data enabled in Android settings?"
-    echo "   • Is Every Proxy allowed to use cellular?"
+    echo "   • Enabled in Android settings?"
+    echo "   • Every Proxy has network permission?"
     echo ""
-    echo "4. Test routing:"
+    echo "4. Verify routes:"
     echo "   ip route show"
     echo ""
+    
+    # Cleanup on failure
+    echo "[*] Cleaning up..."
+    pkill -f tun2socks 2>/dev/null || true
+    ip link delete $TUN_NAME 2>/dev/null || true
+    ip route del default dev $TUN_NAME 2>/dev/null || true
+    ip route del $PROXY_IP via $GATEWAY dev $INTERFACE 2>/dev/null || true
+    
     exit 1
 fi
