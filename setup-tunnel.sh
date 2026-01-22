@@ -15,7 +15,7 @@ require_cmd() {
 }
 
 # ---------- CHECK REQUIRED COMMANDS ----------
-for cmd in ip awk sudo curl tar uname unzip; do
+for cmd in ip awk sudo curl tar unzip uname; do
     require_cmd "$cmd"
 done
 
@@ -61,48 +61,36 @@ fi
 
 if [ "$SKIP_TUN2SOCKS" != "true" ]; then
     echo "[*] Detecting architecture..."
-    ARCH=$(uname -m | sed \
-        -e 's/x86_64/amd64/' \
-        -e 's/aarch64/arm64/' \
-        -e 's/armv7l/armv7/')
-
+    ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/' -e 's/armv7l/armv7/')
     echo "    Architecture: $ARCH"
     echo ""
 
     echo "[*] Fetching latest release metadata from GitHub..."
     RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest)
-
-    ASSET_URL=$(echo "$RELEASE_JSON" \
-        | grep browser_download_url \
-        | grep "linux-$ARCH" \
-        | head -n1 \
-        | cut -d '"' -f4)
+    ASSET_URL=$(echo "$RELEASE_JSON" | grep browser_download_url | grep "linux-$ARCH" | head -n1 | cut -d '"' -f4)
 
     if [ -z "$ASSET_URL" ]; then
         echo "❌ Could not find linux-$ARCH asset in release"
         exit 1
     fi
 
-    echo "[+] Found asset:"
-    echo "    $ASSET_URL"
-    echo ""
-
+    echo "[+] Found asset: $ASSET_URL"
     TMP_FILE="/tmp/tun2socks.${ASSET_URL##*.}"
-
-    echo "[*] Downloading tun2socks..."
     curl -fL "$ASSET_URL" -o "$TMP_FILE"
 
     echo "[*] Installing..."
     if [[ "$TMP_FILE" == *.zip ]]; then
         unzip -o "$TMP_FILE" -d /tmp
+        BINARY=$(ls /tmp | grep tun2socks-linux-$ARCH)
+        sudo install -m 0755 "/tmp/$BINARY" /usr/local/bin/tun2socks
+        rm -f "/tmp/$BINARY"
     else
         tar -xf "$TMP_FILE" -C /tmp
+        sudo install -m 0755 /tmp/tun2socks /usr/local/bin/tun2socks
+        rm -f /tmp/tun2socks
     fi
 
-    sudo install -m 0755 /tmp/tun2socks /usr/local/bin/tun2socks
-
-    rm -f "$TMP_FILE" /tmp/tun2socks
-
+    rm -f "$TMP_FILE"
     echo "✅ tun2socks installed successfully"
 fi
 
@@ -115,8 +103,22 @@ echo ""
 
 read -p "SOCKS5 proxy address [127.0.0.1:1080]: " SOCKS_PROXY
 SOCKS_PROXY=${SOCKS_PROXY:-127.0.0.1:1080}
-
 echo "[+] Using SOCKS proxy: $SOCKS_PROXY"
+echo ""
+
+# ---------- SYSTEM-WIDE EXPORT COMMANDS ----------
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "💻 Export commands for system-wide routing"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "# Add these to ~/.bashrc or run in any terminal to route apps through SOCKS:"
+echo "export ALL_PROXY=socks5h://$SOCKS_PROXY"
+echo "export http_proxy=\$ALL_PROXY"
+echo "export https_proxy=\$ALL_PROXY"
+echo "export SOCKS_SERVER=$SOCKS_PROXY"
+echo ""
+echo "Example to apply immediately:"
+echo "source ~/.bashrc"
 echo ""
 
 # ---------- PHASE 4: TUN DEVICE ----------
