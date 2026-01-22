@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# -----------------------------
+# PIXEL DEBIAN GUEST SETUP
+# -----------------------------
+
 # 1. Automatically detect the Termux Gateway IP
 GATEWAY_IP=$(ip route | grep default | awk '{print $3}')
 
@@ -25,7 +29,7 @@ proxyEOF
 # 4. Install and configure SSH Server
 sudo apt update && sudo apt install -y openssh-server
 
-# Ensure Port 8022 is set in sshd_config
+# Ensure SSH uses port 8022
 if grep -q "^#Port 22" /etc/ssh/sshd_config; then
     sudo sed -i 's/^#Port 22/Port 8022/' /etc/ssh/sshd_config
 elif grep -q "^Port " /etc/ssh/sshd_config; then
@@ -33,10 +37,6 @@ elif grep -q "^Port " /etc/ssh/sshd_config; then
 else
     echo "Port 8022" | sudo tee -a /etc/ssh/sshd_config
 fi
-
-# Enable password login temporarily (so key can be added)
-sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
 # Ensure SSH runtime directory exists
 sudo mkdir -p /run/sshd
@@ -49,38 +49,17 @@ else
     sudo /usr/sbin/sshd -D -p 8022 &
 fi
 
-# 5. Setup Termux public key for passwordless SSH
-# Assumes Termux public key is in ~/termux_id_ed25519.pub
-TERMUX_KEY_FILE="$HOME/termux_id_ed25519.pub"
-if [ -f "$TERMUX_KEY_FILE" ]; then
-    mkdir -p ~/.ssh
-    touch ~/.ssh/authorized_keys
-    grep -qxF "$(cat $TERMUX_KEY_FILE)" ~/.ssh/authorized_keys || \
-        cat $TERMUX_KEY_FILE >> ~/.ssh/authorized_keys
-    chmod 700 ~/.ssh
-    chmod 600 ~/.ssh/authorized_keys
-    echo "[*] Termux public key installed for passwordless login"
-else
-    echo "[!] Termux public key not found at $TERMUX_KEY_FILE"
-    echo "    Please copy your Termux public key to this file and re-run the script"
-fi
-
-# 6. Disable password login now that key is added (more secure)
-sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-sudo systemctl restart ssh || sudo /usr/sbin/sshd -D -p 8022 &
-
-# 7. Get the VM's current IP for the user
+# 5. Get the VM's current IP
 VM_IP=$(ip addr show enp0s12 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
 
 echo "-------------------------------------------------------"
 echo "PIXEL GUEST SETUP COMPLETE"
 echo "-------------------------------------------------------"
 echo "[+] Internet: Configured via $GATEWAY_IP:1080"
-echo "[+] SSH Server: Running on port 8022 with key-based login"
+echo "[+] SSH Server: Running on port 8022"
 echo ""
 echo "TO CONNECT FROM TERMUX:"
-echo "Run: ssh -p 8022 droid@$VM_IP"
+echo "ssh -p 8022 droid@$VM_IP"
 echo ""
-echo "NOTE: If internet stops working after a reboot, re-run"
-echo "this script to update the Gateway IP."
+echo "NOTE: Internet proxy will remain configured. Re-run this script after reboot if needed."
 echo "-------------------------------------------------------"
