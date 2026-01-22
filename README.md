@@ -67,10 +67,10 @@ chmod +x setup-host.sh &
 
 ```bash
 # In Debian Terminal (connected to WiFi):
-sudo apt install git
-git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
-cd pixel-debian-cellular
-chmod +x setup-guest.sh
+sudo apt install git &
+git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git &
+cd pixel-debian-cellular &
+chmod +x setup-guest.sh &
 sudo ./setup-guest.sh
 ```
 
