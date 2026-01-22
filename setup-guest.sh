@@ -22,11 +22,28 @@ Acquire::https::Proxy "socks5h://$GATEWAY_IP:1080/";
 Acquire::socks::proxy "socks5h://$GATEWAY_IP:1080/";
 proxyEOF
 
-# 4. Set Up SSH Server for Termux Access
-sudo apt update && sudo apt install openssh-server -y
-sudo sed -i 's/#Port 22/Port 8022/' /etc/ssh/sshd_config
+# 4. Install and configure SSH Server
+sudo apt update && sudo apt install -y openssh-server
+
+# Ensure Port 8022 is set in sshd_config
+if grep -q "^#Port 22" /etc/ssh/sshd_config; then
+    sudo sed -i 's/^#Port 22/Port 8022/' /etc/ssh/sshd_config
+elif grep -q "^Port " /etc/ssh/sshd_config; then
+    sudo sed -i 's/^Port .*/Port 8022/' /etc/ssh/sshd_config
+else
+    echo "Port 8022" | sudo tee -a /etc/ssh/sshd_config
+fi
+
+# Ensure SSH runtime directory exists
 sudo mkdir -p /run/sshd
-sudo /usr/sbin/sshd -p 8022
+
+# Start SSH server
+if command -v systemctl &>/dev/null; then
+    sudo systemctl enable ssh
+    sudo systemctl restart ssh
+else
+    sudo /usr/sbin/sshd -D -p 8022 &
+fi
 
 # 5. Get the VM's current IP for the user
 VM_IP=$(ip addr show enp0s12 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
