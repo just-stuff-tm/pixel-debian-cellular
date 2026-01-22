@@ -21,7 +21,7 @@ This project solves that by routing terminal traffic through your Pixel's cellul
 ## 🚀 Quick Start on Termux
 
 ```bash
-# ONE-TIME SETUP (requires WiFi):
+# ONE-TIME SETUP:
 
 # 1. Install Termux and run script below. 
 ```
