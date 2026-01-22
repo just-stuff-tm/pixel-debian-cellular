@@ -27,10 +27,10 @@ This project solves that by routing terminal traffic through your Pixel's cellul
 ```
 ```bash
 # 2. In Termux:
-pkg install git -y
-git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
-cd pixel-debian-cellular
-chmod +x setup-host.sh
+pkg install git -y &
+git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git &
+cd pixel-debian-cellular &
+chmod +x setup-host.sh &
 ./setup-host.sh
 ```
 ```bash
