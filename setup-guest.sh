@@ -4,7 +4,7 @@
 # PIXEL DEBIAN GUEST SETUP
 # -----------------------------
 
-# 1. Automatically detect the Termux Gateway IP
+# 1. Detect Termux Gateway IP
 GATEWAY_IP=$(ip route | grep default | awk '{print $3}')
 
 if [ -z "$GATEWAY_IP" ]; then
@@ -12,21 +12,41 @@ if [ -z "$GATEWAY_IP" ]; then
     exit 1
 fi
 
-echo "Setting up bridge to Termux at $GATEWAY_IP..."
+echo "Setting up system-wide bridge to Termux at $GATEWAY_IP..."
 
-# 2. Set Persistent Environment Variables for Internet Access
-sed -i '/ALL_PROXY/d' ~/.bashrc
-echo "export ALL_PROXY=socks5h://$GATEWAY_IP:1080" >> ~/.bashrc
-echo "export all_proxy=socks5h://$GATEWAY_IP:1080" >> ~/.bashrc
+# 2. System-wide proxy configuration for environment
+PROXY="socks5h://$GATEWAY_IP:1080"
 
-# 3. Set Persistent APT Proxy
-sudo tee /etc/apt/apt.conf.d/99proxy > /dev/null << proxyEOF
-Acquire::http::Proxy "socks5h://$GATEWAY_IP:1080/";
-Acquire::https::Proxy "socks5h://$GATEWAY_IP:1080/";
-Acquire::socks::proxy "socks5h://$GATEWAY_IP:1080/";
-proxyEOF
+# Persist proxy variables for all users
+for f in /etc/environment /etc/profile /etc/bash.bashrc; do
+    sudo sed -i '/ALL_PROXY/d' $f
+    sudo sed -i '/all_proxy/d' $f
+    sudo sed -i '/HTTPS_PROXY/d' $f
+    sudo sed -i '/https_proxy/d' $f
+    echo "ALL_PROXY=\"$PROXY\"" | sudo tee -a $f > /dev/null
+    echo "all_proxy=\"$PROXY\"" | sudo tee -a $f > /dev/null
+    echo "HTTPS_PROXY=\"$PROXY\"" | sudo tee -a $f > /dev/null
+    echo "https_proxy=\"$PROXY\"" | sudo tee -a $f > /dev/null
+done
 
-# 4. Install and configure SSH Server
+# Export for current shell immediately
+export ALL_PROXY=$PROXY
+export all_proxy=$PROXY
+export HTTPS_PROXY=$PROXY
+export https_proxy=$PROXY
+
+echo "[+] System-wide proxy set to $PROXY"
+
+# 3. Configure APT to use the proxy
+sudo tee /etc/apt/apt.conf.d/99proxy > /dev/null << EOF
+Acquire::http::Proxy "$PROXY/";
+Acquire::https::Proxy "$PROXY/";
+Acquire::socks::proxy "$PROXY/";
+EOF
+
+echo "[+] APT proxy configured"
+
+# 4. Install and configure SSH server
 sudo apt update && sudo apt install -y openssh-server
 
 # Ensure SSH uses port 8022
@@ -49,17 +69,18 @@ else
     sudo /usr/sbin/sshd -D -p 8022 &
 fi
 
-# 5. Get the VM's current IP
+# 5. Get Debian VM IP
 VM_IP=$(ip addr show enp0s12 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
 
 echo "-------------------------------------------------------"
 echo "PIXEL GUEST SETUP COMPLETE"
 echo "-------------------------------------------------------"
-echo "[+] Internet: Configured via $GATEWAY_IP:1080"
+echo "[+] System-wide Internet via $PROXY"
 echo "[+] SSH Server: Running on port 8022"
 echo ""
 echo "TO CONNECT FROM TERMUX:"
 echo "ssh -p 8022 droid@$VM_IP"
 echo ""
-echo "NOTE: Internet proxy will remain configured. Re-run this script after reboot if needed."
+echo "Test system-wide connectivity immediately:"
+echo "curl https://ifconfig.me"
 echo "-------------------------------------------------------"
