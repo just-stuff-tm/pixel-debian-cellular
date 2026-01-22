@@ -1,6 +1,6 @@
 # Pixel Debian Terminal Cellular Access
 
-Enable cellular data for Google Pixel's experimental Debian terminal. **WiFi only required for initial setup.**
+Enable cellular data for Google Pixel's experimental Debian Terminal. One time wifi setup required  on Debian Terminal if installing using git.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: Pixel](https://img.shields.io/badge/platform-Google%20Pixel-blue.svg)](https://store.google.com/product/pixel)
@@ -10,36 +10,31 @@ Enable cellular data for Google Pixel's experimental Debian terminal. **WiFi onl
 
 Google Pixel's experimental Debian terminal (Android 14+) **can only access the internet via WiFi by default**. It cannot use cellular data.
 
-This project solves that by routing terminal traffic through your Pixel's cellular connection using tun2socks.
+This project solves that by routing terminal traffic through your Pixel's cellular connection using Termux .
 
 ## ✨ The Solution
 
-- 📱 **WiFi only needed once** - for initial tun2socks download
-- 🚀 **After setup** - Use cellular data even with WiFi disabled
-- 🔧 **No external devices** - Everything runs on your Pixel
+- 🚀 **After setup** - Use cellular data even with WiFi disabled.
+- 🔧 **No external devices** - Everything runs on your Pixel and You can ssh into the terminal via Termux for a user friendly experience.
 - 🌍 **Full cellular access** - All terminal apps use mobile data
 
-## 🚀 Quick Start
+## 🚀 Quick Start on Termux
 
 ```bash
 # ONE-TIME SETUP (requires WiFi):
 
-# 1. Install Every Proxy from Play Store
-#    Configure: SOCKS5, port 1080, bind 127.0.0.1
-#    Tap START
+# 1. Install Termux and run script below. 
 ```
 ```bash
-# 2. In Debian Terminal (connect to WiFi first):
+# 2. In Termux:
 
 git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
 cd pixel-debian-cellular
-chmod +x setup-tunnel.sh
-sudo ./setup-tunnel.sh
+chmod +x setup-host.sh
+sudo ./setup-host.sh
 ```
 ```bash
-# 3. Done! WiFi now optional:
-curl ipinfo.io/ip  # Shows cellular IP
-# You can now disable WiFi - terminal keeps cellular internet
+# 3. Follow instructions provided by Termux
 ```
 
 ## 📦 Prerequisites
@@ -56,15 +51,6 @@ curl ipinfo.io/ip  # Shows cellular IP
    Enable and download
    ```
 
-2. **Every Proxy** (Android app)
-   - Install: [Play Store Link](https://play.google.com/store/apps/details?id=com.gorillasoftware.everyproxy)
-   - Free, no account needed
-   - Bridges cellular to container
-
-3. **WiFi Connection** (one-time only)
-   - Needed to download tun2socks
-   - Can disable after setup
-
 ## 📥 Installation
 
 ### Step 1: Enable Debian Terminal
@@ -79,25 +65,12 @@ curl ipinfo.io/ip  # Shows cellular IP
 6. Open "Terminal" app from app drawer
 ```
 
-### Step 2: Setup Every Proxy
-
-1. Install **[Every Proxy](https://play.google.com/store/apps/details?id=com.gorillasoftware.everyproxy)** from Play Store
-2. Configure:
-   - **Server Type:** SOCKS5
-   - **Port:** 1080
-   - **Bind Address:** 127.0.0.1 (NOT 0.0.0.0)
-   - **Authentication:** None
-3. Tap **START**
-4. Verify notification: "Proxy server running on port 1080"
-
-### Step 3: Run Setup
-
 ```bash
 # In Debian Terminal (connected to WiFi):
 git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
 cd pixel-debian-cellular
-chmod +x setup-tunnel.sh
-./setup-tunnel.sh
+chmod +x setup-guest.sh
+sudo ./setup-guest.sh
 ```
 
 ### Step 4: Test Cellular Access
@@ -113,53 +86,11 @@ curl ipinfo.io/ip
 
 ## 🎮 Usage
 
-### Start Cellular Access
+### Start Cellular Access On Debian Termianl
 ```bash
-./setup-tunnel.sh
+sudo ./setup-guest.sh
 ```
 
-### Check Status
-```bash
-./check-status.sh
-```
-
-### Stop Cellular
-```bash
-./stop-tunnel.sh
-```
-
-## 🔧 Troubleshooting
-
-### "Cannot connect to SOCKS5 proxy"
-
-**Solution:**
-1. Verify Every Proxy is running
-2. Check settings: SOCKS5, port 1080, bind 127.0.0.1
-3. Test: `curl -x socks5://127.0.0.1:1080 ipinfo.io/ip`
-
-### "No internet during setup"
-
-**Solution:**
-1. Connect to WiFi
-2. Verify: `ping -c 3 google.com`
-3. Run setup again
-
-### "Tunnel created but no connection"
-
-**Solution:**
-1. Check cellular data is enabled
-2. Restart Every Proxy
-3. View logs: `tail -f /tmp/tun2socks.log`
-
-## 🙏 Credits
-
-### Core Technology
-- **[xjasonlyu/tun2socks](https://github.com/xjasonlyu/tun2socks)** - High-performance tun2socks (Go)
-- **[Every Proxy](https://play.google.com/store/apps/details?id=com.gorillasoftware.everyproxy)** - SOCKS5 server for Android
-
-### Alternative Solutions
-- **[Shadowsocks Android](https://github.com/shadowsocks/shadowsocks-android)** - Encrypted proxy
-- **[badvpn](https://github.com/ambrop72/badvpn)** - Original C implementation
 
 ## 📄 License
 
