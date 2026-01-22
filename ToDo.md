@@ -1,1 +1,1 @@
-Update Proper IP Detection And Setting Proper IP in Every Port
+Include Instructions For Setup Without Wifi!
