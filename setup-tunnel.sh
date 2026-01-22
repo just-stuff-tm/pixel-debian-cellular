@@ -75,7 +75,7 @@ if command -v tun2socks &> /dev/null; then
     echo ""
     read -p "Reinstall latest version? (y/n) " -n 1 -r
     echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! \( REPLY =~ ^[Yy] \) ]]; then
         echo "[*] Skipping tun2socks installation"
         SKIP_TUN2SOCKS=true
     fi
@@ -97,7 +97,7 @@ if [ "$SKIP_TUN2SOCKS" != "true" ]; then
     
     echo "   Latest version: v$VERSION"
     
-    DOWNLOAD_URL="https://github.com/xjasonlyu/tun2socks/releases/download/v${VERSION}/tun2socks-linux-${ARCH}.zip"
+    DOWNLOAD_URL="https://github.com/xjasonlyu/tun2socks/releases/download/v\( {VERSION}/tun2socks-linux- \){ARCH}.zip"
     
     echo ""
     echo "[*] Downloading tun2socks v$VERSION..."
@@ -143,7 +143,7 @@ ANDROID_IP=$(ip route | grep default | awk '{print $3}' | head -n 1)
 # Get local gateway
 SUBNET=$(ip addr show $INTERFACE 2>/dev/null | grep -oP 'inet \K[\d.]+/\d+' | head -1)
 if [ -n "$SUBNET" ]; then
-    GATEWAY=$(echo $SUBNET | cut -d'/' -f1 | sed 's/\.[0-9]*$/.1/')
+    GATEWAY=$(echo \( SUBNET | cut -d'/' -f1 | sed 's/\.[0-9]* \)/.1/')
 else
     # Fallback: try to detect from route
     GATEWAY=$(ip route | grep "default" | awk '{print $3}' | head -n 1)
@@ -164,7 +164,7 @@ if [ -z "$GATEWAY" ]; then
 fi
 
 PROXY_IP="$ANDROID_IP"
-PROXY_URL="socks5://${PROXY_IP}:${PROXY_PORT}"
+PROXY_URL="socks5://\( {PROXY_IP}: \){PROXY_PORT}"
 
 echo ""
 echo "[+] Network Configuration Detected:"
@@ -230,7 +230,7 @@ if [ -z "$TEST_IP" ]; then
     echo ""
     read -p "Continue anyway? (y/n) " -n 1 -r
     echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! \( REPLY =~ ^[Yy] \) ]]; then
         exit 1
     fi
 else
@@ -272,9 +272,15 @@ echo "   Proxy: $PROXY_URL"
 echo "   Interface: $INTERFACE"
 echo ""
 
-tun2socks -device $TUN_NAME -proxy "$PROXY_URL" -interface $INTERFACE -loglevel info > "$LOG_FILE" 2>&1 &
-TUN2SOCKS_PID=$!
+setsid nohup tun2socks \
+    -device "$TUN_NAME" \
+    -proxy "$PROXY_URL" \
+    -interface "$INTERFACE" \
+    -loglevel info \
+    > "$LOG_FILE" 2>&1 < /dev/null &
 
+TUN2SOCKS_PID=$!
+disown $TUN2SOCKS_PID || true
 echo "   ✓ tun2socks started (PID: $TUN2SOCKS_PID)"
 echo ""
 
