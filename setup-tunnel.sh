@@ -14,8 +14,8 @@ require_cmd() {
     }
 }
 
-# ---------- REQUIREMENTS ----------
-for cmd in ip awk sudo curl tar uname; do
+# ---------- CHECK REQUIRED COMMANDS ----------
+for cmd in ip awk sudo curl tar uname unzip; do
     require_cmd "$cmd"
 done
 
@@ -27,8 +27,6 @@ echo ""
 
 DEF_IFACE=$(ip route show default | awk '{print $5}')
 DEF_GW=$(ip route show default | awk '{print $3}')
-
-# Most reliable way on Pixel
 SRC_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')
 
 if [ -z "$DEF_IFACE" ] || [ -z "$SRC_IP" ]; then
@@ -71,30 +69,41 @@ if [ "$SKIP_TUN2SOCKS" != "true" ]; then
     echo "    Architecture: $ARCH"
     echo ""
 
-    echo "[*] Fetching latest release from GitHub..."
-    VERSION=$(curl -fsSL https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest \
-        | awk -F'"' '/tag_name/{print $4}' | sed 's/^v//')
+    echo "[*] Fetching latest release metadata from GitHub..."
+    RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest)
 
-    if [ -z "$VERSION" ]; then
-        echo "⚠️  Failed to fetch latest version, using fallback v2.5.2"
-        VERSION="2.5.2"
+    ASSET_URL=$(echo "$RELEASE_JSON" \
+        | grep browser_download_url \
+        | grep "linux-$ARCH" \
+        | head -n1 \
+        | cut -d '"' -f4)
+
+    if [ -z "$ASSET_URL" ]; then
+        echo "❌ Could not find linux-$ARCH asset in release"
+        exit 1
     fi
 
-    echo "    Version: v$VERSION"
+    echo "[+] Found asset:"
+    echo "    $ASSET_URL"
     echo ""
 
-    URL="https://github.com/xjasonlyu/tun2socks/releases/download/v${VERSION}/tun2socks-linux-${ARCH}.tar.gz"
+    TMP_FILE="/tmp/tun2socks.${ASSET_URL##*.}"
 
     echo "[*] Downloading tun2socks..."
-    curl -fL "$URL" -o /tmp/tun2socks.tar.gz
+    curl -fL "$ASSET_URL" -o "$TMP_FILE"
 
     echo "[*] Installing..."
-    tar -xzf /tmp/tun2socks.tar.gz -C /tmp
+    if [[ "$TMP_FILE" == *.zip ]]; then
+        unzip -o "$TMP_FILE" -d /tmp
+    else
+        tar -xf "$TMP_FILE" -C /tmp
+    fi
+
     sudo install -m 0755 /tmp/tun2socks /usr/local/bin/tun2socks
 
-    rm -f /tmp/tun2socks.tar.gz /tmp/tun2socks
+    rm -f "$TMP_FILE" /tmp/tun2socks
 
-    echo "✅ tun2socks v$VERSION installed successfully"
+    echo "✅ tun2socks installed successfully"
 fi
 
 # ---------- PHASE 3: SOCKS PROXY ----------
