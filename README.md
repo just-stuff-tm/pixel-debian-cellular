@@ -27,17 +27,17 @@ This project solves that by routing terminal traffic through your Pixel's cellul
 ```
 ```bash
 # 2. In Termux:
-
+pkg install git -y
 git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
 cd pixel-debian-cellular
 chmod +x setup-host.sh
-sudo ./setup-host.sh
+./setup-host.sh
 ```
 ```bash
 # 3. Follow instructions provided by Termux
 ```
 
-## 📦 Prerequisites
+## 📦 Quick Start On Pixel
 
 ### Hardware
 - **Google Pixel device** (Pixel 3+, tested on Pixel 6/7/8)
@@ -67,6 +67,7 @@ sudo ./setup-host.sh
 
 ```bash
 # In Debian Terminal (connected to WiFi):
+sudo apt install git
 git clone https://github.com/just-stuff-tm/pixel-debian-cellular.git
 cd pixel-debian-cellular
 chmod +x setup-guest.sh
@@ -83,14 +84,6 @@ curl ipinfo.io/ip
 curl ipinfo.io/ip
 # Still works! Using cellular.
 ```
-
-## 🎮 Usage
-
-### Start Cellular Access On Debian Termianl
-```bash
-sudo ./setup-guest.sh
-```
-
 
 ## 📄 License
 
